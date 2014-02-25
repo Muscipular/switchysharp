@@ -30,6 +30,7 @@ Settings.setValue = function setValue(key, value) {
         config = JSON.parse(localStorage.config);
 
     config[key] = value;
+    localStorage.lastModify = Date.now();
     localStorage.config = JSON.stringify(config);
     return value;
 };
@@ -59,6 +60,7 @@ Settings.keyExists = function keyExists(key) {
 
 Settings.setObject = function setObject(key, object) {
     localStorage[key] = JSON.stringify(object);
+    localStorage.lastModify = Date.now();
     return object;
 };
 
@@ -72,3 +74,51 @@ Settings.getObject = function getObject(key) {
 Settings.refreshCache = function refreshCache() {
     Settings.configCache = {};
 };
+
+
+!function (Settings) {
+    var sync = chrome.storage.sync;
+
+    var compute = function (syncOne, cb) {
+        var localOne = localStorage;
+        var lastModify = localOne.lastModify;
+        if (!lastModify) {
+            localOne.lastModify = lastModify = Date.now();
+        }
+        if (lastModify < syncOne.lastModify || 0) {
+            Settings.refreshCache();
+            localOne.clear();
+            Object.getOwnPropertyNames(syncOne).forEach(function (f) {
+                localOne[f] = syncOne[f];
+            });
+        } else if (lastModify > syncOne.lastModify || 0) {
+            var syncObj = {};
+            Object.getOwnPropertyNames(localOne).forEach(function (f) {
+                syncObj[f] = localOne[f];
+            });
+            sync.clear(function () {
+                var lastError = chrome.runtime.lastError;
+                if (!lastError) {
+                    sync.set(syncObj, cb);
+                } else {
+                    console.error(lastError);
+                    cb();
+                }
+            });
+        }
+    };
+
+    !function SyncLoop() {
+        sync.getValue(null, function (storage) {
+            var lastError = chrome.runtime.lastError;
+            if (storage && !lastError) {
+                compute(storage, function () {
+                    setTimeout(SyncLoop, 60000);
+                });
+            } else {
+                console.error(lastError);
+                setTimeout(SyncLoop, 60000);
+            }
+        });
+    }();
+}(Settings);
